@@ -25,24 +25,27 @@ currently using neither package-management style.
 [PackageReference support](https://learn.microsoft.com/en-us/nuget/consume-packages/package-references-in-project-files),
 [restore guidance](https://learn.microsoft.com/en-us/nuget/consume-packages/package-restore).
 
-## 2. Retain the original and share only explicit setup
+## 2. Independent implementations and explicit setup
 
-**Decision**: Add EfUserService beside SqlUserService. Leave SqlUserService.cs, IUserService.cs,
-User.cs, and Database/Schema.sql unchanged. Compose SqlUserService only for its existing
-connection validation and explicit CreateOrUpdateDatabaseAsync operation. EF performs every
-user query, insertion, update, and deletion independently.
+**Decision (corrected by user requirement)**: EfUserService never references, constructs or
+delegates to SqlUserService. It independently validates connection settings and implements
+explicit setup through EF-owned contexts and Database.ExecuteSqlCommandAsync. Create a missing
+catalog through master without a transaction; apply the shared embedded schema under an
+EF transaction and the same transaction-owned schema application lock. Handle catalog creation
+races and preserve cancellation/error categories.
 
-**Rationale**: The existing setup already handles repeatability, constraint repair, creation
-races, transactions and schema locking. Reusing that infrastructure avoids a second schema
-authority while preserving both data-access implementations for comparison. Constructor validation
-does not access storage. No normal EF operation invokes setup.
+**Rationale**: Removing SqlUserService.cs must leave the EF implementation buildable and
+runnable. The previous composition decision violated that independence requirement and is
+superseded. Sharing a schema definition and public contracts does not couple service classes.
+EF raw commands are limited to explicit DDL/setup; user reads and writes use EF queries/tracking.
 
-**Alternatives considered**: EF migrations/initializers would introduce different schema ownership
-and potentially extra tables. Extracting shared internals from the original obscures the baseline;
-delegating EF data operations to it would fail the comparison goal.
+Keep the original SqlUserService class body unchanged. Relocate the existing
+DuplicateLoginException into its own file without changing its namespace, signature or behavior.
+IUserService.cs, User.cs and Database/Schema.sql remain unchanged.
 
-**Evidence**: `UserDatabaseService/SqlUserService.cs`, `Database/Schema.sql`, and existing service
-integration checks. This setup composition is a project-specific design decision.
+**Verification**: Compile an executable from EF sources and shared contracts only, excluding
+SqlUserService.cs, UserServiceFactory.cs and the normal service DLL. Run all seven operations,
+concurrent/repeated setup, constraint repair, duplicate handling and cancellation in that executable.
 
 ## 3. Explicit model and provider configuration
 

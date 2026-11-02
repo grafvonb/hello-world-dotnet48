@@ -7,8 +7,8 @@
 ## Summary
 
 Add EfUserService implementing the unchanged IUserService contract beside SqlUserService.
-Use EF6 for all user queries and CRUD; share only original constructor validation and explicit
-schema setup through composition. Both target the same table and data rules. A small factory
+Use EF6 for all seven operations with independent connection validation and explicit setup.
+EfUserService has no dependency on SqlUserService; both share only contracts/model and schema definition. Both target the same table and data rules. A small factory
 selects Sql (default) or EntityFramework from application configuration. Preserve the current
 window, original service, and schema. Extend existing checks to prove behavior parity.
 
@@ -27,7 +27,8 @@ No migrations, new tables, history tables, seed data, or automatic initializatio
 
 **Testing**: Existing Windows PowerShell service and STA window harnesses, extended for Sql,
 EntityFramework, and Both; real SQL Server owned fixtures; test-only EF command interception.
-Visual Studio MSBuild restore/build and copied-host deployment checks. No new test framework.
+Visual Studio MSBuild restore/build, copied-host deployment checks and an EF-only compile/run
+excluding the SQL implementation. No new test framework.
 
 **Target Platform**: Existing Windows runtime/build environment capable of net48 execution,
 Visual Studio MSBuild with PackageReference restore and NuGet access.
@@ -41,7 +42,7 @@ No formal throughput benchmark or claim that one implementation is faster.
 
 **Constraints**: Retain original public types, validation and outcomes, source ordering, async
 cancellation, parameterized user values, read-only application startup, safe failure messages,
-and System.Data.SqlClient. Preserve SqlUserService.cs unchanged.
+and System.Data.SqlClient. Preserve the SqlUserService class body unchanged; relocate the shared exception to its own file.
 
 **Scale/Scope**: Seven service operations, datasets 0/1/1,000, filtered input limit 2,000.
 Configuration selection only; no new picker, editing UI, backend, or authentication model.
@@ -55,7 +56,7 @@ Configuration selection only; no new picker, editing UI, backend, or authenticat
 | I. Compatibility | PASS | PASS | Pinned EF6 net45 assets support net48; classic projects/C# 7.3 retained. |
 | II. Service boundary | PASS | PASS | EF/context/configuration stay in the library; window only selects IUserService. |
 | III. Responsive UI | PASS | PASS | Lazy construction, worker-owned cold model preparation, native async I/O, existing close guards. |
-| IV. Data/configuration | PASS | PASS | Explicit shared setup, disabled initializer, same constraints, bound inputs, unchanged original/schema. |
+| IV. Data/configuration | PASS | PASS | Independent explicit setup, disabled initializer, same schema/constraints and bound inputs. |
 | V. Verification | PASS | PASS | Both existing suites plus cross-provider, SQL interception and copied-host checks. |
 | Scope/documentation | PASS | PASS | User-requested dependency has a documented comparison purpose; README/quickstart describe restore and selection. |
 
@@ -92,7 +93,8 @@ UserDatabaseService/
 ├── UserDbConfiguration.cs       # New; one EF provider configuration, initializer disabled.
 ├── UserServiceFactory.cs        # New; Sql/EntityFramework selection, no configuration file I/O.
 ├── UserDatabaseService.csproj   # Exact EF package, explicit Compile entries, copy-local output.
-├── SqlUserService.cs            # Retained unchanged, including DuplicateLoginException.
+├── SqlUserService.cs            # Class body unchanged; shared exception relocated.
+├── DuplicateLoginException.cs   # Shared contract, independent of implementation files.
 ├── IUserService.cs              # Retained unchanged.
 ├── User.cs                      # Retained unchanged.
 └── Database/Schema.sql          # Retained unchanged.
@@ -103,13 +105,15 @@ HelloWorldWpf48/
 └── MainWindow.xaml             # No required change.
 scripts/
 ├── Test-UserDatabaseService.ps1 # Extend existing suite with provider selection/parity/interception.
-└── Test-MainWindow.ps1          # Extend real-source host with provider selection/cold EF checks.
+├── Test-MainWindow.ps1          # Extend real-source host with provider selection/cold EF checks.
+└── Test-EfIndependence.ps1      # Compile/run all EF operations without SQL implementation.
 README.md                      # Both implementations, package restore, configuration and checks.
 ```
 
 **Structure Decision**: Keep the implementation alternatives readable side by side in the current
 library. New small EF-specific classes meet framework needs; avoid a new repository abstraction,
-DTO, shared-context singleton, test project, or refactor of the original baseline.
+DTO, shared-context singleton or test project. Only the shared exception is extracted from
+the original source file; the SqlUserService class implementation is preserved.
 
 ### Phase 0: Research outcome
 
@@ -119,8 +123,11 @@ primary package metadata, Microsoft documentation and EF source.
 
 ### Phase 1: Design
 
-- EfUserService stores a validated connection and a composed SqlUserService used solely for
-  constructor validation and explicit CreateOrUpdateDatabaseAsync. Never delegate user reads/CRUD.
+- EfUserService independently validates and stores target/master connections and catalog name.
+  Never reference or instantiate SqlUserService. Explicit setup executes through EF-owned contexts:
+  create the catalog through master outside a transaction, then apply the embedded schema through
+  EF commands and a transaction-owned application lock. Preserve creation-race handling, constraint
+  repair, data preservation and cancellation. DuplicateLoginException lives in its own file.
 - Data operations, except the empty multiple-login fast path, validate inputs in original order
   and enter a library-internal
   Task.Run async boundary for context creation/model preparation and native EF asynchronous work.
@@ -169,5 +176,5 @@ do not convert it to a pass. This command creates design documentation only.
 
 ## Complexity Tracking
 
-No constitution violations. Shared explicit schema setup deliberately avoids a second schema
-authority while retaining independent user-data implementations.
+No constitution violations. The services are independent for all seven operations, while
+sharing the unchanged schema definition and public contract types.

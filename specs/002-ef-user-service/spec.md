@@ -14,6 +14,9 @@
 
 - Q: Should the Entity Framework implementation cover the full existing user service or only retrieval operations? → A: Full service: setup, all retrieval operations, create, update, and delete.
 
+- User correction: EfUserService must remain buildable and runnable if SqlUserService.cs is
+  deleted. Setup and connection validation must be implemented independently; no wrapper or composition.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Read the Same Users Through Either Implementation (Priority: P1)
@@ -124,8 +127,12 @@ explicit alternative; run the documented shared behavior checks against both.
 
 - **FR-001**: The service MUST retain the original implementation and add a separately selectable
   Entity Framework implementation for comparison. Both MUST remain directly usable by existing consumers.
-- **FR-002**: The second implementation MUST perform user retrieval and data changes using the
-  requested alternative approach, rather than forwarding those operations to the original implementation.
+- **FR-002**: EfUserService MUST be completely independent of SqlUserService for all seven
+  operations, including connection validation and explicit setup. It MUST NOT construct,
+  reference or delegate to SqlUserService. Removing SqlUserService.cs MUST leave the EF service
+  buildable and runnable with its shared contracts, model, schema resource and EF support classes.
+  Keep the original SqlUserService class implementation unchanged; shared exception contracts
+  MUST live outside either implementation file.
 - **FR-003**: Both implementations MUST support the full existing service contract: explicit storage
   setup/update, retrieve-all, single-login retrieval, multiple-login retrieval, create, update,
   and delete, without breaking existing callers.

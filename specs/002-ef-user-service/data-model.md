@@ -46,14 +46,16 @@ cannot promise reversal of a write that already committed.
 
 ## Context and setup lifecycle
 
-Construct EfUserService without creating a context or initializing EF. Store a composed
-SqlUserService only for existing connection validation and explicit setup. Normal operations
+Construct EfUserService without creating a context or initializing EF. Validate the connection
+independently and store normalized target/master connection strings and catalog name. Never
+reference or instantiate SqlUserService. Normal operations
 create/use/dispose their own context inside a worker async flow; native EF queries/saves take
 the operation token. UserDbConfiguration is applied once before first context use, and disables
 the initializer. No implicit setup, migrations or history tables.
 
-Explicit setup uses the original repeatable schema workflow and locking. No context is shared
-with setup. A pre-canceled or failed operation never justifies dropping/recreating storage.
+Explicit setup uses EF-owned master/target contexts, EF database commands and a transaction
+with the shared schema lock. Both services apply the unchanged embedded schema definition.
+No context is shared between operations. A pre-canceled or failed operation never justifies dropping/recreating storage.
 
 ## Implementation selection
 

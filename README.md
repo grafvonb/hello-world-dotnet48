@@ -1,7 +1,8 @@
 # WPF User Directory
 
 A read-only Windows desktop user directory targeting **.NET Framework 4.8** with
-**C# 7.3**, using WPF (XAML and C#). No NuGet packages are required.
+**C# 7.3**, using WPF (XAML and C#). Compare the original ADO.NET service with
+a parallel Entity Framework 6.5.2 implementation against the same SQL Server data.
 
 ## Open and run in Visual Studio
 
@@ -25,7 +26,7 @@ can run the resulting application.
 From the directory containing the solution:
 
 ```powershell
-msbuild .\HelloWorldWpf48.sln /t:Build /p:Configuration=Debug /p:Platform="Any CPU"
+msbuild .\HelloWorldWpf48.sln -restore /t:Build /p:Configuration=Debug /p:Platform="Any CPU"
 .\HelloWorldWpf48\bin\Debug\HelloWorldWpf48.exe
 ```
 
@@ -46,12 +47,12 @@ settings or unavailable/unprepared storage produce an error rather than an empty
 
 ### Window validation
 
-After building, run the dependency-free window checks in Windows PowerShell:
+After restoring and building, run the window checks in Windows PowerShell:
 
 ```powershell
 powershell.exe -NoProfile -STA -File .\scripts\Test-MainWindow.ps1
 # Validate the real SQL source using an owned disposable database:
-powershell.exe -NoProfile -STA -File .\scripts\Test-MainWindow.ps1 -SqlServer localhost
+powershell.exe -NoProfile -STA -File .\scripts\Test-MainWindow.ps1 -SqlServer localhost -Implementation Both
 # Open interactive views for keyboard, readability, and pending-operation checks:
 powershell.exe -NoProfile -STA -File .\scripts\Test-MainWindow.ps1 -Interactive
 ```
@@ -59,18 +60,22 @@ powershell.exe -NoProfile -STA -File .\scripts\Test-MainWindow.ps1 -Interactive
 Use -Configuration Release after building Release, or -Phase US1, -Phase US2, or
 -Phase US3 to run one story's controlled checks. The default suite uses fake data and covers 1/100/1,000 rows,
 duplicate names, Unicode, zero age, long values, loading, empty results, failures, Retry,
-and closing while work is pending. The optional SQL mode creates a separate temporary
+and closing while work is pending. The optional SQL mode runs each selected provider in a fresh copied executable host, including
+EF cold initialization and cancellation. It creates a separate temporary
 host/configuration and a randomly named test database, then removes both. It does not
 change the normal connection or server authentication settings.
 
-See specs/001-display-user-list/quickstart.md for manual scenarios and recorded results.
+See specs/002-ef-user-service/quickstart.md for comparison evidence and outstanding manual checks.
+The inherited scenarios are in specs/001-display-user-list/quickstart.md.
 
 ## SQL Server user service
 
 The solution also contains **UserDatabaseService**, a .NET Framework 4.8 / C# 7.3
-class library referenced by the WPF project. It uses the built-in ADO.NET
-`System.Data.SqlClient` provider; no NuGet packages are required. Its C# API is
-intended to be called from the desktop app.
+class library referenced by the WPF project. `SqlUserService` uses ADO.NET directly;
+`EfUserService` independently implements the same reads and CRUD using EF6. Both use
+`System.Data.SqlClient`, the same `IUserService` contract and the same `User` model.
+Both projects restore the exact EntityFramework 6.5.2 NuGet package. Keep
+`EntityFramework.dll` and `EntityFramework.SqlServer.dll` beside the deployed application.
 
 `dbo.[User]` is the only application table:
 
@@ -109,6 +114,32 @@ SQL updates. This initial scaffold expects the table layout above; it does not
 automatically transform an unrelated existing table. No database is created
 just by launching the WPF sample: call setup explicitly when you want it.
 
+### Choose the implementation
+
+In `HelloWorldWpf48/App.config`, select the service used by the main window:
+
+```xml
+<appSettings>
+  <add key="UserServiceImplementation" value="EntityFramework" />
+</appSettings>
+```
+
+The checked-in default is `Sql`. Missing or blank values also select `Sql`; both
+names accept surrounding whitespace and ignore case. Unknown values show the
+configuration error with Retry. Both choices use the same `UserDatabase` connection
+string. Rebuild and restart after changing source configuration.
+
+You can also construct either service directly or use
+`UserServiceFactory.Create("EntityFramework", connectionString)`. EF uses a fresh
+context per operation and no tracking for reads, so reused service instances see
+changes made through the other implementation. Automatic database initialization
+and EF migrations are disabled. EF independently validates connections and implements all
+seven operations, including setup through EF contexts, commands and transactions. It never
+constructs or calls `SqlUserService`. Both use the shared schema definition. The original
+`SqlUserService` class implementation is preserved; `DuplicateLoginException` is a separate
+shared contract file so deleting the SQL implementation does not break the EF variant.
+The main window only reads data and never invokes setup.
+
 ### Calling the API from C#
 
 For example, inside an async WPF event handler:
@@ -118,7 +149,8 @@ using System.Configuration;
 using UserDatabaseService;
 
 // In your async method:
-IUserService users = new SqlUserService(
+// Replace EfUserService with SqlUserService to compare the original.
+IUserService users = new EfUserService(
     ConfigurationManager.ConnectionStrings["UserDatabase"].ConnectionString);
 
 await users.CreateOrUpdateDatabaseAsync();
@@ -145,19 +177,37 @@ bool deleted = await users.DeleteAsync("alice");
 return `false` when no matching user exists. Multiple-login queries return only
 existing matches, once each, ordered by login. An empty input returns an empty
 list. Supply at most 2000 distinct logins per call to stay below SQL Server's
-parameter limit. All database methods accept an optional `CancellationToken`.
+parameter limit. All seven operations accept an optional `CancellationToken`. EF performs cold model
+preparation on a worker flow and uses native asynchronous SQL I/O.
 Invalid values produce argument exceptions; connection, permission, and other
 SQL errors propagate as `SqlException`. Database queries use typed parameters.
 
 ### Integration check
 
+Prove EF builds and runs without the SQL implementation (requires the built EF DLLs and
+Visual Studio C# compiler):
+
+```powershell
+.\scripts\Test-EfIndependence.ps1 -Server localhost
+```
+
+This compiles EF and shared contracts into a temporary executable, excluding
+`SqlUserService.cs`, the two-provider factory and the normal service DLL, then exercises
+all seven operations using an owned disposable database.
+
+
 Build the solution, then run this in Windows PowerShell:
 
 ```powershell
-.\scripts\Test-UserDatabaseService.ps1
+.\scripts\Test-UserDatabaseService.ps1 -Implementation Both
 # Or explicitly select another SQL Server instance:
-.\scripts\Test-UserDatabaseService.ps1 -Server 'localhost\SQLEXPRESS'
+.\scripts\Test-UserDatabaseService.ps1 -Server 'localhost\SQLEXPRESS' -Implementation Both
 ```
+
+Use `-Implementation Sql` or `-Implementation EntityFramework` for one provider; the
+default remains `Sql`. `Both` also verifies cross-provider visibility and EF Unicode
+parameter binding for 1 and 2,000 login inputs. This is a correctness comparison;
+no performance ranking is claimed.
 
 The check creates a randomly named `UserServiceTest_...` database and removes
 it afterward. It verifies schema creation and updates, data preservation,

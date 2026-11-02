@@ -2,6 +2,7 @@ param(
     [ValidateSet('Debug', 'Release')][string]$Configuration = 'Debug',
     [ValidateSet('All', 'US1', 'US2', 'US3')][string]$Phase = 'All',
     [string]$SqlServer,
+    [ValidateSet('Sql', 'EntityFramework', 'Both')][string]$Implementation = 'Sql',
     [switch]$Interactive
 )
 $ErrorActionPreference = 'Stop'
@@ -13,10 +14,12 @@ $exe = Join-Path $build 'HelloWorldWpf48.exe'
 $service = Join-Path $build 'UserDatabaseService.dll'
 if (!(Test-Path $exe)) { throw 'Build the solution first.' }
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Xaml, System.Configuration
+Add-Type -Path (Join-Path $build 'EntityFramework.dll')
+Add-Type -Path (Join-Path $build 'EntityFramework.SqlServer.dll')
 Add-Type -Path $service
 $applicationAssembly = [Reflection.Assembly]::LoadFrom($exe)
 $references = @(
-    $service, 'System.dll', 'System.Core.dll', 'System.Configuration.dll', 'System.Data.dll',
+    $service, (Join-Path $build 'EntityFramework.dll'), 'System.dll', 'System.Core.dll', 'System.Configuration.dll', 'System.Data.dll',
     [Windows.Window].Assembly.Location,
     [Windows.Media.Visual].Assembly.Location,
     [Windows.Threading.Dispatcher].Assembly.Location,
@@ -24,6 +27,8 @@ $references = @(
 )
 $sourceCode = @'
 using System;
+using System.Data.Entity;
+using System.Data.Entity.Infrastructure.Interception;
 using System.Collections.Generic;
 using System.Configuration;
 using System.Diagnostics;
@@ -58,6 +63,56 @@ public sealed class WindowUserSource : IUserService
     public Task CreateAsync(User user, CancellationToken token) { throw Unexpected(); }
     public Task<bool> UpdateAsync(User user, CancellationToken token) { throw Unexpected(); }
     public Task<bool> DeleteAsync(string login, CancellationToken token) { throw Unexpected(); }
+}
+
+
+public sealed class EfWindowProbe : DbCommandInterceptor
+{
+    public int UserReads;
+    public override void ReaderExecuting(System.Data.Common.DbCommand command,
+        DbCommandInterceptionContext<System.Data.Common.DbDataReader> context)
+    {
+        if (command.CommandText.Contains("[User]")) Interlocked.Increment(ref UserReads);
+    }
+}
+
+public sealed class ColdModelGate : IDbConnectionInterceptor, IDisposable
+{
+    public readonly ManualResetEventSlim Started = new ManualResetEventSlim();
+    public readonly ManualResetEventSlim Release = new ManualResetEventSlim();
+    private int entered;
+    public void Opening(System.Data.Common.DbConnection connection, DbConnectionInterceptionContext context)
+    {
+        if (Interlocked.CompareExchange(ref entered, 1, 0) == 0)
+        {
+            Started.Set();
+            if (!Release.Wait(3000)) throw new Exception("Cold initialization blocked the UI test timeout.");
+        }
+    }
+    public void BeginningTransaction(System.Data.Common.DbConnection connection, BeginTransactionInterceptionContext context) { }
+    public void BeganTransaction(System.Data.Common.DbConnection connection, BeginTransactionInterceptionContext context) { }
+    public void Closing(System.Data.Common.DbConnection connection, DbConnectionInterceptionContext context) { }
+    public void Closed(System.Data.Common.DbConnection connection, DbConnectionInterceptionContext context) { }
+    public void ConnectionStringGetting(System.Data.Common.DbConnection connection, DbConnectionInterceptionContext<System.String> context) { }
+    public void ConnectionStringGot(System.Data.Common.DbConnection connection, DbConnectionInterceptionContext<System.String> context) { }
+    public void ConnectionStringSetting(System.Data.Common.DbConnection connection, DbConnectionPropertyInterceptionContext<System.String> context) { }
+    public void ConnectionStringSet(System.Data.Common.DbConnection connection, DbConnectionPropertyInterceptionContext<System.String> context) { }
+    public void ConnectionTimeoutGetting(System.Data.Common.DbConnection connection, DbConnectionInterceptionContext<System.Int32> context) { }
+    public void ConnectionTimeoutGot(System.Data.Common.DbConnection connection, DbConnectionInterceptionContext<System.Int32> context) { }
+    public void DatabaseGetting(System.Data.Common.DbConnection connection, DbConnectionInterceptionContext<System.String> context) { }
+    public void DatabaseGot(System.Data.Common.DbConnection connection, DbConnectionInterceptionContext<System.String> context) { }
+    public void DataSourceGetting(System.Data.Common.DbConnection connection, DbConnectionInterceptionContext<System.String> context) { }
+    public void DataSourceGot(System.Data.Common.DbConnection connection, DbConnectionInterceptionContext<System.String> context) { }
+    public void Disposing(System.Data.Common.DbConnection connection, DbConnectionInterceptionContext context) { }
+    public void Disposed(System.Data.Common.DbConnection connection, DbConnectionInterceptionContext context) { }
+    public void EnlistingTransaction(System.Data.Common.DbConnection connection, EnlistTransactionInterceptionContext context) { }
+    public void EnlistedTransaction(System.Data.Common.DbConnection connection, EnlistTransactionInterceptionContext context) { }
+    public void Opened(System.Data.Common.DbConnection connection, DbConnectionInterceptionContext context) { }
+    public void ServerVersionGetting(System.Data.Common.DbConnection connection, DbConnectionInterceptionContext<System.String> context) { }
+    public void ServerVersionGot(System.Data.Common.DbConnection connection, DbConnectionInterceptionContext<System.String> context) { }
+    public void StateGetting(System.Data.Common.DbConnection connection, DbConnectionInterceptionContext<System.Data.ConnectionState> context) { }
+    public void StateGot(System.Data.Common.DbConnection connection, DbConnectionInterceptionContext<System.Data.ConnectionState> context) { }
+    public void Dispose() { Started.Dispose(); Release.Dispose(); }
 }
 
 public static class MainWindowChecks
@@ -318,12 +373,54 @@ public static class MainWindowChecks
         config.Save(ConfigurationSaveMode.Modified);
         ConfigurationManager.RefreshSection("connectionStrings");
     }
+
+    private static void ConfigureImplementation(string value)
+    {
+        var config = ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.None);
+        config.AppSettings.Settings.Remove("UserServiceImplementation");
+        if (value != null) config.AppSettings.Settings.Add("UserServiceImplementation", value);
+        config.Save(ConfigurationSaveMode.Modified);
+        ConfigurationManager.RefreshSection("appSettings");
+    }
+
+    private static void CloseDuringColdModel(string connection)
+    {
+        using (var gate = new ColdModelGate())
+        {
+            DbInterception.Add(gate);
+            try
+            {
+                var realSource = new EfUserService(connection);
+                var source = new WindowUserSource();
+                Task<IReadOnlyList<User>> pending = null;
+                source.Outcomes.Enqueue(token => { pending = realSource.GetAllAsync(token); return pending; });
+                var w = NewWindow(() => source);
+                var watch = Stopwatch.StartNew();
+                w.Show();
+                Until(() => gate.Started.IsSet, "cold EF model preparation");
+                Assert(watch.ElapsedMilliseconds < 1000 && Status(w).IsVisible &&
+                    Status(w).Text == "Loading users...", "UI processes events during cold EF initialization.");
+                var text = Status(w).Text;
+                watch.Restart();
+                w.Close();
+                Assert(watch.ElapsedMilliseconds < 1000, "Close remains immediate during cold model work.");
+                gate.Release.Set();
+                Until(() => pending != null && pending.IsCompleted, "canceled cold EF work");
+                Pump();
+                Assert(pending.IsCanceled && Status(w).Text == text && source.OtherCalls == 0,
+                    "Cold EF cancellation is observed without late UI mutation or writes.");
+                Console.WriteLine("PASS: EntityFramework - responsive cold model preparation, immediate close and cancellation");
+            }
+            finally { gate.Release.Set(); DbInterception.Remove(gate); }
+        }
+    }
+
     private static Window ProductionWindow()
     {
         var w = (Window)Activator.CreateInstance(windowType);
         windows.Add(w); w.Show(); return w;
     }
-    private static void SqlChecks(Assembly assembly, string server)
+    private static void SqlChecks(Assembly assembly, string server, string implementation, string scenario)
     {
         windowType = assembly.GetType("HelloWorldWpf48.MainWindow", true);
         var name = "UserListWindowTest_" + Guid.NewGuid().ToString("N");
@@ -334,6 +431,10 @@ public static class MainWindowChecks
         builder.InitialCatalog = "master";
         var master = builder.ConnectionString;
         var source = new SqlUserService(connection);
+        DbConfiguration.LoadConfiguration(typeof(IUserService).Assembly.GetType("UserDatabaseService.UserDbContext", true));
+        var probe = new EfWindowProbe();
+        DbInterception.Add(probe);
+        ConfigureImplementation(implementation);
         var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         app.DispatcherUnhandledException += (s, e) => { unhandled.Add(e.Exception); e.Handled = true; };
         try
@@ -341,9 +442,41 @@ public static class MainWindowChecks
             // Explicit fixture setup happens outside application loading.
             source.CreateOrUpdateDatabaseAsync().GetAwaiter().GetResult();
             Configure(connection);
+            if (scenario == "ColdClose")
+            {
+                CloseDuringColdModel(connection);
+                return;
+            }
+            var watch = Stopwatch.StartNew();
             var empty = ProductionWindow();
+            bool uiReady = false;
+            empty.Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(() => uiReady = true));
+            Until(() => uiReady, "responsive initial UI");
+            Assert(watch.ElapsedMilliseconds < 1000, "Loading UI responds within one second.");
+            Console.WriteLine("PASS: {0} - first window UI dispatch {1} ms", implementation, watch.ElapsedMilliseconds);
             Until(() => Status(empty).Text == "No users found", "real SQL empty result");
+            Assert(implementation == "EntityFramework" ? probe.UserReads > 0 : probe.UserReads == 0,
+                "Configured window actually uses the selected query implementation.");
             empty.Close();
+            foreach (string value in new[] { null, "", " ", " sQL ", " eNTITYfRAMEWORK " })
+            {
+                var selected = UserServiceFactory.Create(value, connection);
+                Assert(selected.GetType().Name == (value != null && value.Trim().Equals("EntityFramework", StringComparison.OrdinalIgnoreCase)
+                    ? "EfUserService" : "SqlUserService"), "Factory selection/default/case/trim.");
+            }
+            foreach (string value in new[] { null, " ", " sQL " })
+            {
+                ConfigureImplementation(value);
+                var defaultView = ProductionWindow();
+                Until(() => Status(defaultView).Text == "No users found", "default or explicit Sql view");
+                defaultView.Close();
+            }
+            ConfigureImplementation("invalid choice");
+            var badChoice = ProductionWindow();
+            Until(() => Failed(badChoice), "invalid implementation");
+            Assert(Status(badChoice).Text.Contains("configured"), "Unknown implementation gives configuration feedback.");
+            badChoice.Close();
+            ConfigureImplementation(implementation);
             foreach (var row in new[] {
                 new User { Name = "Same Name", Login = "alice", Age = 0 },
                 new User { Name = "Same Name", Login = "bob", Age = 30 },
@@ -356,7 +489,7 @@ public static class MainWindowChecks
             populated.Close();
             var after = string.Join("|", source.GetAllAsync().GetAwaiter().GetResult().Select(u => u.Login + ":" + u.Name + ":" + u.Age));
             Assert(before == after, "Real application viewing preserves rows.");
-            Console.WriteLine("PASS: SQL default constructor/config path; empty/populated/duplicate names/Unicode/zero; data unchanged");
+            Console.WriteLine("PASS: " + implementation + " - default constructor/config path; empty/populated/duplicate names/Unicode/zero; data unchanged");
 
             foreach (string invalid in new[] { null, "invalid connection value" })
             {
@@ -366,7 +499,7 @@ public static class MainWindowChecks
                 Assert(Status(bad).Text.Contains("configured"), "Real configuration failure is categorized.");
                 bad.Close();
             }
-            Console.WriteLine("PASS: SQL host missing and invalid connection settings");
+            Console.WriteLine("PASS: " + implementation + " - host missing and invalid connection settings");
 
             builder.InitialCatalog = name + "_Absent";
             Configure(builder.ConnectionString);
@@ -384,7 +517,7 @@ public static class MainWindowChecks
             Assert(Scalar(connection, "SELECT OBJECT_ID(N'dbo.[User]', N'U')") == DBNull.Value, "Application did not recreate user table.");
             unprepared.Close();
             SqlCommand(connection, "EXEC sys.sp_rename N'dbo.User_ValidationHidden', N'User';");
-            Console.WriteLine("PASS: SQL unavailable database/unprepared table; no automatic database/schema setup");
+            Console.WriteLine("PASS: " + implementation + " - unavailable database/unprepared table; no automatic database/schema setup");
 
             // An intentionally nonexistent SQL login proves provider access rejection without
             // creating accounts or changing server authentication/security settings.
@@ -393,7 +526,7 @@ public static class MainWindowChecks
                 Password = Guid.NewGuid().ToString("N")
             };
             string activeConnection = denied.ConnectionString;
-            var retry = NewWindow(() => new SqlUserService(activeConnection));
+            var retry = NewWindow(() => UserServiceFactory.Create(implementation, activeConnection));
             retry.Show();
             Until(() => Failed(retry), "SQL access rejection");
             Assert(Status(retry).Text.Contains("denied"), "SQL access error category.");
@@ -404,13 +537,14 @@ public static class MainWindowChecks
             retry.Close();
             Assert(before == string.Join("|", source.GetAllAsync().GetAwaiter().GetResult().Select(u => u.Login + ":" + u.Name + ":" + u.Age)), "Negative cases and retry preserve fixture data.");
             Assert(unhandled.Count == 0, "No unhandled SQL-window errors.");
-            Console.WriteLine("PASS: SQL provider access denial followed by one Retry; data preserved");
-            Console.WriteLine("PASS: " + assertions + " SQL assertions");
+            Console.WriteLine("PASS: " + implementation + " - provider access denial followed by one Retry; data preserved");
+            Console.WriteLine("PASS: " + implementation + " - " + assertions + " real-source assertions");
         }
         finally
         {
             foreach (var w in windows) if (w.IsVisible) w.Close();
             app.Shutdown();
+            DbInterception.Remove(probe);
             System.Data.SqlClient.SqlConnection.ClearAllPools();
             // Name is generated by this test; no normal database or principal is touched.
             SqlCommand(master, "IF DB_ID(N'" + name + "') IS NOT NULL BEGIN ALTER DATABASE [" + name +
@@ -421,7 +555,7 @@ public static class MainWindowChecks
     [STAThread]
     public static int Main(string[] args)
     {
-        try { SqlChecks(Assembly.LoadFrom(args[0]), args[1]); return 0; }
+        try { SqlChecks(Assembly.LoadFrom(args[0]), args[1], args[2], args[3]); return 0; }
         catch (Exception error)
         {
             var sql = error as System.Data.SqlClient.SqlException;
@@ -501,12 +635,18 @@ if ($SqlServer) {
         Copy-Item ($exe + '.config') ($hostExe + '.config')
         $stdout = Join-Path $validationDirectory 'stdout.txt'
         $stderr = Join-Path $validationDirectory 'stderr.txt'
-        $arguments = @(('"{0}"' -f (Join-Path $validationDirectory 'HelloWorldWpf48.exe')), ('"{0}"' -f $SqlServer))
-        $process = Start-Process -FilePath $hostExe -ArgumentList $arguments -Wait -PassThru -NoNewWindow -RedirectStandardOutput $stdout -RedirectStandardError $stderr
-        Get-Content -LiteralPath $stdout
-        if ($process.ExitCode -ne 0) {
-            Get-Content -LiteralPath $stderr | Write-Host
-            throw 'SQL window validation failed.'
+        $implementations = if ($Implementation -eq 'Both') { @('Sql', 'EntityFramework') } else { @($Implementation) }
+        foreach ($mode in $implementations) {
+            $scenarios = if ($mode -eq 'EntityFramework') { @('Full', 'ColdClose') } else { @('Full') }
+            foreach ($scenario in $scenarios) {
+                $arguments = @(('"{0}"' -f (Join-Path $validationDirectory 'HelloWorldWpf48.exe')), ('"{0}"' -f $SqlServer), $mode, $scenario)
+                $process = Start-Process -FilePath $hostExe -ArgumentList $arguments -Wait -PassThru -NoNewWindow -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+                Get-Content -LiteralPath $stdout
+                if ($process.ExitCode -ne 0) {
+                    Get-Content -LiteralPath $stderr | Write-Host
+                    throw "SQL window validation failed: $mode / $scenario."
+                }
+            }
         }
     } finally {
         Remove-Item -LiteralPath $validationDirectory -Recurse -Force

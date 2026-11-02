@@ -9,14 +9,6 @@ using System.Threading.Tasks;
 
 namespace UserDatabaseService
 {
-    public sealed class DuplicateLoginException : InvalidOperationException
-    {
-        public DuplicateLoginException(string login, Exception innerException)
-            : base("A user with login '" + login + "' already exists.", innerException)
-        {
-        }
-    }
-
     public sealed class SqlUserService : IUserService
     {
         private const int MaxTextLength = 100;

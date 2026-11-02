@@ -12,6 +12,7 @@
     <LangVersion>7.3</LangVersion>
     <FileAlignment>512</FileAlignment>
     <Deterministic>true</Deterministic>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
@@ -32,12 +33,21 @@
     <Reference Include="System" />
     <Reference Include="System.Core" />
     <Reference Include="System.Data" />
+    <Reference Include="System.ComponentModel.DataAnnotations" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="IUserService.cs" />
+    <Compile Include="DuplicateLoginException.cs" />
     <Compile Include="SqlUserService.cs" />
+    <Compile Include="UserDbContext.cs" />
+    <Compile Include="EfUserService.cs" />
+    <Compile Include="UserServiceFactory.cs" />
+    <Compile Include="UserDbConfiguration.cs" />
     <Compile Include="User.cs" />
     <EmbeddedResource Include="Database\Schema.sql" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="EntityFramework" Version="[6.5.2]" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

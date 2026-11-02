@@ -41,7 +41,8 @@ namespace HelloWorldWpf48
             if (setting == null || string.IsNullOrWhiteSpace(setting.ConnectionString))
                 throw new ConfigurationErrorsException("The UserDatabase connection is required.");
 
-            return new SqlUserService(setting.ConnectionString);
+            return UserServiceFactory.Create(
+                ConfigurationManager.AppSettings["UserServiceImplementation"], setting.ConnectionString);
         }
 
         private async void WindowLoaded(object sender, RoutedEventArgs e)
