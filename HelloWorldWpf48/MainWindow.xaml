@@ -1,0 +1,24 @@
+<Window x:Class="HelloWorldWpf48.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Hello World - WPF"
+        Width="480" Height="280"
+        ResizeMode="CanMinimize"
+        WindowStartupLocation="CenterScreen"
+        Background="#F4F6FA"
+        FontFamily="Segoe UI">
+    <StackPanel Margin="32" VerticalAlignment="Center">
+        <TextBlock x:Name="GreetingText"
+                   Text="Hello, World!"
+                   FontSize="32" FontWeight="SemiBold"
+                   Foreground="#17304D"
+                   AutomationProperties.AutomationId="GreetingText" />
+        <TextBlock Text="WPF · .NET Framework 4.8 · C# 7.3"
+                   Margin="0,10,0,24"
+                   FontSize="14" Foreground="#526175" />
+        <Button Content="Say hello" Click="SayHello_Click"
+                HorizontalAlignment="Left"
+                Padding="20,8" FontSize="14"
+                AutomationProperties.AutomationId="SayHelloButton" />
+    </StackPanel>
+</Window>

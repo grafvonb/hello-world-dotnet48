@@ -1,0 +1,24 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 18
+VisualStudioVersion = 18.0.0.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HelloWorldWpf48", "HelloWorldWpf48\HelloWorldWpf48.csproj", "{4D7E6F3D-1171-4CE8-A1D8-9D467CB47713}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UserDatabaseService", "UserDatabaseService\UserDatabaseService.csproj", "{598A38BF-D247-49E3-9DFE-C60B7F5E176F}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{598A38BF-D247-49E3-9DFE-C60B7F5E176F}.Debug|Any CPU.ActiveCfg = Debug|AnyCPU
+		{598A38BF-D247-49E3-9DFE-C60B7F5E176F}.Debug|Any CPU.Build.0 = Debug|AnyCPU
+		{598A38BF-D247-49E3-9DFE-C60B7F5E176F}.Release|Any CPU.ActiveCfg = Release|AnyCPU
+		{598A38BF-D247-49E3-9DFE-C60B7F5E176F}.Release|Any CPU.Build.0 = Release|AnyCPU
+		{4D7E6F3D-1171-4CE8-A1D8-9D467CB47713}.Debug|Any CPU.ActiveCfg = Debug|AnyCPU
+		{4D7E6F3D-1171-4CE8-A1D8-9D467CB47713}.Debug|Any CPU.Build.0 = Debug|AnyCPU
+		{4D7E6F3D-1171-4CE8-A1D8-9D467CB47713}.Release|Any CPU.ActiveCfg = Release|AnyCPU
+		{4D7E6F3D-1171-4CE8-A1D8-9D467CB47713}.Release|Any CPU.Build.0 = Release|AnyCPU
+	EndGlobalSection
+EndGlobal
