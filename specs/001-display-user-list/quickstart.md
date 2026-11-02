@@ -1,6 +1,6 @@
 # Quickstart Validation: Main-Window User List
 
-This guide is executed after implementation. Planning has not built or run the new UI.
+This guide validates the implemented window. Execution results and remaining manual checks are recorded below.
 See [main-window contract](contracts/main-window.md),
 [user-source contract](contracts/user-source.md), and [data model](data-model.md).
 
@@ -26,7 +26,7 @@ produce failure feedback; it is not a successful empty result.
 
 ## Controlled window checks
 
-The following script is planned by this design and will be created during implementation:
+Run the dependency-free window harness:
 
 ```powershell
 powershell.exe -NoProfile -STA -File .\scripts\Test-MainWindow.ps1 -Configuration Debug
@@ -55,8 +55,8 @@ Measure loading feedback and completed-result presentation against SC-002. The s
 observe rendered/layout-ready controls after a supplied result, not just private state flags.
 Do not manufacture SqlException with reflection; use the real-source cases below.
 
-For keyboard/readability checks, the planned harness also supports a final interactive
-1,000-record view:
+For keyboard/readability checks, interactive mode opens three views in sequence: 1,000 records,
+a failed source with keyboard Retry, and a pending source that can be moved and closed:
 
 ```powershell
 powershell.exe -NoProfile -STA -File .\scripts\Test-MainWindow.ps1 -Configuration Debug -Interactive
@@ -69,6 +69,22 @@ with Tab and activate it with Enter or Space. During a pending-source check, mov
 window; it must respond without waiting for I/O.
 
 ## Real SQL smoke check with an owned fixture
+
+The repeatable automated equivalent runs the real window in a disposable host/configuration:
+
+```powershell
+powershell.exe -NoProfile -STA -File .\scripts\Test-MainWindow.ps1 -SqlServer localhost
+```
+
+It checks the parameterless production constructor and configured source, creates/removes a
+randomly named database, and verifies empty/populated states, missing/invalid configuration,
+unavailable/unprepared storage, provider access rejection, recovery, and unchanged records.
+The access-recovery case switches its injected factory from intentionally rejected credentials
+to the valid fixture connection; it does not create accounts or change server authentication.
+The default application does not promise configuration hot reload.
+
+The following manual setup is an alternative for inspecting the real source interactively.
+
 
 Use a fresh Windows PowerShell session so fixture variables remain available. These are explicit
 test setup commands, not application behavior. They copy the build and change only the copied
@@ -152,4 +168,40 @@ separate UI smoke check after the script returns.
 Record build result, automated window outcomes, manual keyboard/long-value checks, timings,
 real-source results, and any checks not run with the reason. Confirm FR-001–FR-011 and
 SC-001–SC-005, and update README with the final startup/setup and validation instructions.
-No application check in this guide is claimed to have passed merely because planning completed.
+Only checks with recorded execution evidence below are treated as passed.
+
+
+## Execution results — 2026-11-02
+
+| Check | Result | Evidence |
+|---|---|---|
+| Debug / Any CPU build | PASS | Visual Studio 18 MSBuild completed successfully for both projects. |
+| Full fake-source STA suite | PASS | 1,182 assertions; populated/empty/error/retry/cancellation/closure cases passed. |
+| Rendered values | PASS | Actual first Name and last Login/Age cells matched expected values; long fields use wrapping. |
+| Real SQL window suite | PASS | 13 assertions against localhost; default constructor/configuration, empty/populated states, invalid/missing settings, missing database/table, access rejection and Retry passed. |
+| Data preservation and cleanup | PASS | Fixture rows unchanged; owned database and host removed; remaining SQL-window fixtures: zero. |
+| Manual keyboard/readability/window interaction | NOT RUN | Computer Use could not initialize due to the workspace-path runtime error below. T009 remains unchecked. |
+| Existing service regression script | NOT RUN | Service and schema source are unchanged; window integration was tested with the real SQL source. |
+
+Final full-suite timing measurements:
+
+| Records | Initial loading feedback | Supplied-result layout |
+|---:|---:|---:|
+| 1 | 127 ms | 23 ms |
+| 100 | 89 ms | 35 ms |
+| 1,000 | 83 ms | 18 ms |
+
+Timing includes observing layout-ready controls; source waiting time is excluded from the
+result-layout measurement. Source-independent tests also confirmed cancellation requests,
+late success/fault suppression, and absence of setup/write calls.
+
+Manual limitation: the Computer Use runtime returned
+"sandboxCwd is not a local file URI: file:///mnt/c/Users/adamb/Development/Workspace/Boczek/Learning/wpf/HelloWorldWpf48".
+The same initialization failed after resetting the runtime. Actual keyboard input, visual
+readability, resizing/scrolling, and moving the window have not been claimed as verified.
+Run the interactive command above to finish T009. Programmatic row/cell/read-only/accessibility
+and pending-close checks passed, but do not substitute for that manual acceptance session.
+
+The SQL access category was exercised through a genuine authentication rejection; individual
+SELECT-denied provider codes 229/230 were not separately exercised. Permission changes were
+not made to any normal database or principal.

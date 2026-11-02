@@ -1,6 +1,6 @@
-# WPF Hello World
+# WPF User Directory
 
-A local Windows desktop example targeting **.NET Framework 4.8** with
+A read-only Windows desktop user directory targeting **.NET Framework 4.8** with
 **C# 7.3**, using WPF (XAML and C#). No NuGet packages are required.
 
 ## Open and run in Visual Studio
@@ -8,8 +8,12 @@ A local Windows desktop example targeting **.NET Framework 4.8** with
 1. Open `HelloWorldWpf48.sln` in Visual Studio.
 2. Select **Debug** and **Any CPU** in the toolbar.
 3. Press **F5** to build and run with the debugger, or **Ctrl+F5** to run without it.
-4. The window shows **Hello, World!**. Click **Say hello** to change the greeting
-   to **Hello from C# 7.3!**.
+4. The main window automatically loads users from the configured **UserDatabase** source.
+   It shows **Name**, **Login**, and **Age** in login order. Use the keyboard or scrollbars
+   to reach all rows and complete field values.
+5. An empty source shows **No users found**. A loading failure shows a safe explanation and
+   **Retry**; Retry is unavailable while a request is pending. You can move or close the
+   window during loading.
 
 The installed Visual Studio Community is version 18 (Visual Studio 2026).
 Its MSBuild tools and the installed .NET Framework 4.8 reference assemblies
@@ -29,15 +33,37 @@ Use Visual Studio's MSBuild for this classic .NET Framework WPF project.
 
 ## Files to explore
 
-- `HelloWorldWpf48/MainWindow.xaml`: window layout and controls.
-- `HelloWorldWpf48/MainWindow.xaml.cs`: constructor and button click handler.
+- `HelloWorldWpf48/MainWindow.xaml`: read-only user grid, loading status, and Retry.
+- `HelloWorldWpf48/MainWindow.xaml.cs`: lazy source creation, async loading/retry, and shutdown.
 - `HelloWorldWpf48/App.xaml`: starts the main window.
 - `HelloWorldWpf48/HelloWorldWpf48.csproj`: project settings, including
   `<TargetFrameworkVersion>v4.8</TargetFrameworkVersion>` and
   `<LangVersion>7.3</LangVersion>`.
 
-To try a small change, edit the initial greeting in `MainWindow.xaml`, then
-build and run again.
+The view does not create, edit, delete, seed, or initialize user storage. Prepare the
+database explicitly using the service setup described below before normal use. Missing
+settings or unavailable/unprepared storage produce an error rather than an empty result.
+
+### Window validation
+
+After building, run the dependency-free window checks in Windows PowerShell:
+
+```powershell
+powershell.exe -NoProfile -STA -File .\scripts\Test-MainWindow.ps1
+# Validate the real SQL source using an owned disposable database:
+powershell.exe -NoProfile -STA -File .\scripts\Test-MainWindow.ps1 -SqlServer localhost
+# Open interactive views for keyboard, readability, and pending-operation checks:
+powershell.exe -NoProfile -STA -File .\scripts\Test-MainWindow.ps1 -Interactive
+```
+
+Use -Configuration Release after building Release, or -Phase US1, -Phase US2, or
+-Phase US3 to run one story's controlled checks. The default suite uses fake data and covers 1/100/1,000 rows,
+duplicate names, Unicode, zero age, long values, loading, empty results, failures, Retry,
+and closing while work is pending. The optional SQL mode creates a separate temporary
+host/configuration and a randomly named test database, then removes both. It does not
+change the normal connection or server authentication settings.
+
+See specs/001-display-user-list/quickstart.md for manual scenarios and recorded results.
 
 ## SQL Server user service
 

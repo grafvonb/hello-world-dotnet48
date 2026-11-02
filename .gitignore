@@ -3,3 +3,8 @@
 [Oo]bj/
 *.user
 *.suo
+packages/
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
