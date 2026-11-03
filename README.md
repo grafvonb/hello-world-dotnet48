@@ -124,7 +124,7 @@ In `HelloWorldWpf48/App.config`, select the service used by the main window:
 </appSettings>
 ```
 
-The checked-in default is `Sql`. Missing or blank values also select `Sql`; both
+The checked-in selection is `EntityFramework`. Missing or blank values select `Sql`; both
 names accept surrounding whitespace and ignore case. Unknown values show the
 configuration error with Retry. Both choices use the same `UserDatabase` connection
 string. Rebuild and restart after changing source configuration.
