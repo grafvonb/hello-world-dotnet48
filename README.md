@@ -8,7 +8,8 @@ Entity Framework stored-procedure calls against the same SQL Server data.
 
 1. Open `HelloWorldWpf48.sln` in Visual Studio.
 2. Select **Debug** and **Any CPU** in the toolbar.
-3. Press **F5** to build and run with the debugger, or **Ctrl+F5** to run without it.
+3. Build the solution, configure SQL Server, and run the database setup script below once.
+   Then press **F5** to run with the debugger, or **Ctrl+F5** to run without it.
 4. The main window automatically loads users from the configured **UserDatabase** source.
    It shows **Name**, **Login**, and **Age** in login order. Use the keyboard or scrollbars
    to reach all rows and complete field values.
@@ -27,6 +28,7 @@ From the directory containing the solution:
 
 ```powershell
 msbuild .\HelloWorldWpf48.sln -restore /t:Build /p:Configuration=Debug /p:Platform="Any CPU"
+.\db.cmd
 .\HelloWorldWpf48\bin\Debug\HelloWorldWpf48.exe
 ```
 
@@ -114,6 +116,41 @@ The selected Windows identity must be able to connect to SQL Server. Creating a
 new database requires database creation permission; schema setup requires DDL
 permission in the selected database. The Sql/EntityFramework implementations require SELECT,
 INSERT, UPDATE, and DELETE permission on `dbo.[User]`.
+
+After building Debug, use these shortcuts from the repository root in PowerShell or
+Command Prompt. They use Windows PowerShell 5.1 and require no Make installation:
+
+```powershell
+.\db.cmd       # Service selected in App.config
+.\db.cmd sql   # SqlUserService
+.\db.cmd ef    # EfUserService
+.\db.cmd sp    # EfStoredProcedureUserService
+.\db.cmd all   # All three setup methods
+```
+
+For Release builds or a different configuration file, call the underlying script:
+
+```powershell
+# Use the connection and service selected in HelloWorldWpf48/App.config:
+powershell.exe -NoProfile -File .\scripts\Initialize-UserDatabase.ps1
+
+# Choose a specific implementation, using the same configured connection:
+powershell.exe -NoProfile -File .\scripts\Initialize-UserDatabase.ps1 -Implementation Sql
+powershell.exe -NoProfile -File .\scripts\Initialize-UserDatabase.ps1 -Implementation EntityFramework
+powershell.exe -NoProfile -File .\scripts\Initialize-UserDatabase.ps1 -Implementation EntityFrameworkStoredProcedures
+
+# Run all three setup methods against that database:
+powershell.exe -NoProfile -File .\scripts\Initialize-UserDatabase.ps1 -Implementation All
+```
+
+The script loads the built service library and calls each selected service's own
+`CreateOrUpdateDatabaseAsync`. It creates the database/schema if absent and preserves
+existing users when rerun. The stored-procedure implementation also installs its type
+and six procedures. It does not seed users or change application configuration.
+Use `-Configuration Release` after building Release. Use `-ConfigPath 'C:\path\App.config'`
+to read a different configuration file; the default path works from any working directory.
+Without `-Implementation`, a missing or blank service setting selects `Sql`, as in the app.
+After setup, start the application or click **Retry** if it is already open.
 
 `CreateOrUpdateDatabaseAsync()` creates the named database if missing, then
 applies the embedded `UserDatabaseService/Database/Schema.sql` inside a
