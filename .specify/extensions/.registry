@@ -52,6 +52,20 @@
       },
       "registered_skills": [],
       "installed_at": "2026-11-02T11:52:01.369288+00:00"
+    },
+    "task-consolidation": {
+      "version": "0.5.0",
+      "source": "local",
+      "manifest_hash": "sha256:5ca2e097d2077622cea58656aedc5c7f152865c32fd886d87406cf5c11f2372d",
+      "enabled": true,
+      "priority": 10,
+      "registered_commands": {
+        "codex": [
+          "speckit.task-consolidation.consolidate"
+        ]
+      },
+      "registered_skills": [],
+      "installed_at": "2026-11-03T12:47:48.180122+00:00"
     }
   }
 }

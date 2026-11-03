@@ -2,6 +2,7 @@ installed:
 - assess
 - bug
 - git
+- task-consolidation
 settings:
   auto_execute_hooks: true
 hooks:
@@ -123,6 +124,15 @@ hooks:
     description: Auto-commit after implementation planning
     condition: null
   after_tasks:
+  - extension: task-consolidation
+    command: speckit.task-consolidation.consolidate
+    enabled: true
+    optional: false
+    priority: 1
+    prompt: Execute speckit.task-consolidation.consolidate?
+    description: Save consolidated tasks before downstream hooks and the completion
+      report.
+    condition: null
   - extension: git
     command: speckit.git.commit
     enabled: true

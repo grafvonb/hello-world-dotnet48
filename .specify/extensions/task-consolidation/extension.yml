@@ -1,0 +1,30 @@
+schema_version: "1.0"
+
+extension:
+  id: "task-consolidation"
+  name: "Task Consolidation"
+  version: "0.5.0"
+  description: "Consolidate task boundaries into cohesive, manageable implementation outcomes."
+  author: "Adam Bogdan Boczek"
+  repository: "https://github.com/grafvonb/spec-kit-extension-task-consolidation"
+  license: "MIT"
+
+requires:
+  speckit_version: ">=1.2.1,<1.3.0"
+
+provides:
+  commands:
+    - name: "speckit.task-consolidation.consolidate"
+      file: "commands/consolidate.md"
+      description: "Consolidate an existing tasks.md while preserving coverage and progress."
+
+hooks:
+  after_tasks:
+    command: "speckit.task-consolidation.consolidate"
+    optional: false
+    priority: 1
+    description: "Save consolidated tasks before downstream hooks and the completion report."
+
+tags:
+  - "tasks"
+  - "workflow"
