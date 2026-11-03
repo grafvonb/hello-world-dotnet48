@@ -171,7 +171,7 @@ In `HelloWorldWpf48/App.config`, select the service used by the main window:
 </appSettings>
 ```
 
-The checked-in selection is `EntityFramework`. Missing or blank values select `Sql`; all three
+The checked-in selection is `EntityFrameworkStoredProcedures`. Missing or blank values select `Sql`; all three
 names accept surrounding whitespace and ignore case. Unknown values show the
 configuration error with Retry. All choices use the same `UserDatabase` connection
 string. Rebuild and restart after changing source configuration.
