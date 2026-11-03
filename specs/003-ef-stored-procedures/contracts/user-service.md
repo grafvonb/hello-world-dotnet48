@@ -41,6 +41,9 @@ fallback service, pre-write existence query or repair-on-failure.
 - Preserve direct System.Data.SqlClient.SqlException with Number for storage/access failures
   by unwrapping known EF wrappers; preserve OperationCanceledException and unexpected failures.
   Missing procedure remains SQL2812; no data/schema operation runs to hide it.
+  Framework attention-only SQL0 (all errors state 0/class 11) becomes cancellation only when
+  the operation's token is canceled, keeping the provider exception as the inner cause.
+  Other SQL errors and uncanceled SQL0 remain failures.
 - Update/delete require exactly one int result in {0,1}. Malformed results are contract failures.
   Zero is not a general error fallback. Do not use ExecuteSqlCommand's count as bool.
 - Repeated calls through retained service instances observe completed writes from all three

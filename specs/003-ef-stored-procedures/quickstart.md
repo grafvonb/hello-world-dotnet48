@@ -1,8 +1,7 @@
 # Quickstart: Compare All Three User Services
 
-This is the implementation-phase validation guide. Planning has not implemented the third
-service, installed procedures, built the change or run these scenarios. New selectors below
-become available during implementation. See the [plan](plan.md), [user-service contract](contracts/user-service.md),
+The third service and selectors are implemented. Automated results and outstanding interactive
+acceptance are recorded below. See the [plan](plan.md), [user-service contract](contracts/user-service.md),
 [procedure contract](contracts/stored-procedures.md) and [selection contract](contracts/implementation-selection.md).
 
 ## Prerequisites
@@ -10,7 +9,7 @@ become available during implementation. See the [plan](plan.md), [user-service c
 - Windows, Visual Studio MSBuild, net48 reference assemblies/runtime and Windows PowerShell 5.1.
 - The existing pinned EF6 6.5.2 package/cache or restore access; no package upgrade.
 - A test SQL Server instance and an identity allowed to create/drop owned databases and apply
-  schema/type/procedure definitions. The planned batches retain the existing effective SQL2012+
+  schema/type/procedure definitions. The setup batches retain the existing effective SQL2012+
   syntax baseline rather than requiring CREATE OR ALTER.
 - Runtime accounts need procedure EXECUTE and EXECUTE/REFERENCES on dbo.UserLoginList.
   Setup privilege requirements are separate. Normal account/server-login permissions are untouched.
@@ -49,7 +48,7 @@ chosen UserDatabase connection and awaits CreateOrUpdateDatabaseAsync outside th
 Procedure/type definitions and permission prerequisites are detailed in the procedure contract;
 do not add setup to constructors, service selection, normal data calls or Retry.
 
-The new documented configuration choice will be:
+The third configuration choice is:
 
 ```xml
 <add key="UserServiceImplementation" value="EntityFrameworkStoredProcedures" />
@@ -122,8 +121,7 @@ powershell.exe -NoProfile -STA -File .\scripts\Test-MainWindow.ps1 -Interactive
 powershell.exe -NoProfile -STA -File .\scripts\Test-MainWindow.ps1 -SqlServer localhost -Implementation EntityFrameworkStoredProcedures -Interactive
 ```
 
-The second command is the planned use of the existing Interactive option in the copied real
-host, keeping its owned fixture available until the window closes. Check keyboard navigation,
+The second command uses the existing Interactive option in the copied real host, keeping its owned fixture available until the window closes. Check keyboard navigation,
 1,000-row scroll, wrapped/complete text, readability after resizing, Retry focus and moving/
 closing a pending window; inspect the actual third-configured window as well.
 
@@ -132,18 +130,48 @@ the WSL workspace with `sandboxCwd is not a local file URI`, including after a k
 Reattempt during implementation; retain exact failure and outstanding status if still unavailable.
 Automated state/Dispatcher assertions cannot substitute for visual/keyboard acceptance.
 
-## Completion Evidence to Record During Implementation
+## Recorded Validation — 2026-11-03
 
-No results below are claimed by planning. Record build/runtime-DLL results, each selected
-contract outcome, all-six procedure observations, TVP boundaries, six-way freshness, independent
-compile/run and configuration-order checks, setup/grant/schema preservation, real failure/Retry,
-cold/supplied-result timings and owned cleanup. Distinguish passed, failed and unexecuted checks.
+Validation used Visual Studio 18 Community MSBuild Debug/Any CPU, .NET Framework 4.8
+targets, C# 7.3, EF6 6.5.2 and SQL Server localhost.
 
-Verify no implementation diff against the feature's base for SqlUserService.cs, EfUserService.cs,
-UserDbContext.cs, UserDbConfiguration.cs, IUserService.cs, User.cs, DuplicateLoginException.cs and
-Database/Schema.sql. Preserve the user's pre-existing App.config edit rather than comparing its
-local selection to the missing/blank Sql fallback.
+| Check | Actual result |
+|---|---|
+| Restore/build/deployment | PASS: final Windows solution restore/build; both EF DLLs present in service and app outputs; copied hosts resolve their local DLLs. |
+| Full service suite | PASS: All mode, **314 assertions**. Original scenarios pass for Sql, EntityFramework and EntityFrameworkStoredProcedures. |
+| Read parity | PASS: all three retrieval methods compared for 0/1/1,000 records across all three services in one shared fixture. |
+| Procedure/parameter proof | PASS: all six exact async EF invocations observed; scalar types/sizes, actual matched Unicode/punctuation values and 1/2,000-row structured payloads; 2,001 rejected before opening a connection, including while procedures are unavailable. |
+| Write and identity parity | PASS: unchanged update=true, missing writes=false, immutable stored login spelling, case/accent, caller objects, duplicate races, validation and cancellation categories. |
+| Cross-service state | PASS: all six directed writer→primed-retained-reader create/update/delete pairings; concurrent all-three setup repairs missing check/procedure and preserves rows. |
+| Setup/error boundaries | PASS: each missing procedure produces SQL2812 without implicit repair; explicit setup restores it. Stale procedures, invalid result row counts/values, missing table, incompatible type, real SQL229, EXECUTE-only runtime access and retained procedure grants pass. |
+| Executing cancellation | PASS: cancellation while waiting on an externally held creation lock is observed as cancellation; the master session is disposed and subsequent explicit setup succeeds. Nonzero SQL error cases remain provider failures. |
+| Independent executables | PASS: Both mode, **22 assertions** for EfUserService and **26** for EfStoredProcedureUserService. Third executable contains no older service/context/configuration/factory or baseline service DLL; all seven operations work with normal provider discovery. Three consecutive Both runs also passed after creation serialization. |
+| Controlled window suite | PASS: **1,182 assertions**. Loading 1/100/1,000 rows: 168/91/90 ms; supplied-result layout: 47/21/22 ms. Empty/error/Retry and late success/fault/cancel closure pass. |
+| Real-source windows | PASS: All mode, **22/22/25 assertions** for Sql/EntityFramework/EntityFrameworkStoredProcedures, respectively. All three selections, configuration failures, populated/empty/errors, Retry and unchanged fixture users pass. |
+| Cold UI/order | PASS: separate preparation process, fresh EF cold-close hosts, both normal EF discovery orders, immediate close and no late mutation. All-mode first UI dispatch: 226/245/200 ms; final targeted third-service rerun: 196 ms, with 25 assertions and cold/order checks passing again. All UI thresholds are under one second; query throughput was not benchmarked. |
+| Preservation/cleanup | PASS: eight protected baseline files plus App.config byte-identical to the start of implementation. All fixture databases, disposable principal/scopes/interceptors and copied executables are cleaned up. No normal database or normal-account permission was changed. |
+| Repository checks | PASS: git diff --check; required .NET build/package exclusions already present. |
+| Interactive acceptance | **UNEXECUTED: T007 remains open**, as detailed below. |
 
-Map evidence to FR-001–FR-013 and SC-001–SC-007 before claiming complete verification.
-New service, procedure/type installation and runtime/interactive checks remain unimplemented
-or unexecuted until the implementation phase.
+Initial validation caught a test metadata cast and a fixture-specific login assumption; those
+were corrected. An early cold concurrent-creation run returned SQL0. Catalog creation now uses
+a session-owned master lock with an unpooled connection, retaining the existing target-schema
+transaction lock. The added executing-cancellation check exposed Framework SqlClient's
+attention-only SQL0 behavior; only the documented zero/state-0/class-11 pattern with a canceled
+operation token is normalized to cancellation. Other SQL failures are not suppressed and no
+automatic retry policy was added. The final checks above passed after these refinements.
+
+### Remaining Manual Acceptance
+
+Computer Use was retried on 2026-11-03 and failed before desktop access, then failed identically
+after resetting the JavaScript kernel:
+
+```text
+Mcp error: -32602: js: codex/sandbox-state-meta: sandboxCwd is not a local file URI: file:///mnt/c/users/adamb/development/workspace/boczek/learning/wpf/helloworldwpf48
+```
+
+The interactive views were not launched after this failure. Keyboard traversal, visual
+readability/resize/scroll, Retry focus, moving/closing pending work and actual third-configured
+visual inspection remain unexecuted. Earlier features' manual acceptance also remains unexecuted.
+Automated state/Dispatcher checks do not replace those checks. T001–T006 are complete; T007
+stays unchecked.

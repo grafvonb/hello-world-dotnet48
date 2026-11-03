@@ -1,8 +1,8 @@
 # WPF User Directory
 
 A read-only Windows desktop user directory targeting **.NET Framework 4.8** with
-**C# 7.3**, using WPF (XAML and C#). Compare the original ADO.NET service with
-a parallel Entity Framework 6.5.2 implementation against the same SQL Server data.
+**C# 7.3**, using WPF (XAML and C#). Compare ADO.NET, Entity Framework queries and
+Entity Framework stored-procedure calls against the same SQL Server data.
 
 ## Open and run in Visual Studio
 
@@ -52,9 +52,11 @@ After restoring and building, run the window checks in Windows PowerShell:
 ```powershell
 powershell.exe -NoProfile -STA -File .\scripts\Test-MainWindow.ps1
 # Validate the real SQL source using an owned disposable database:
-powershell.exe -NoProfile -STA -File .\scripts\Test-MainWindow.ps1 -SqlServer localhost -Implementation Both
+powershell.exe -NoProfile -STA -File .\scripts\Test-MainWindow.ps1 -SqlServer localhost -Implementation All
 # Open interactive views for keyboard, readability, and pending-operation checks:
 powershell.exe -NoProfile -STA -File .\scripts\Test-MainWindow.ps1 -Interactive
+# Inspect a real stored-procedure view in a copied host with an owned fixture:
+powershell.exe -NoProfile -STA -File .\scripts\Test-MainWindow.ps1 -SqlServer localhost -Implementation EntityFrameworkStoredProcedures -Interactive
 ```
 
 Use -Configuration Release after building Release, or -Phase US1, -Phase US2, or
@@ -65,15 +67,23 @@ EF cold initialization and cancellation. It creates a separate temporary
 host/configuration and a randomly named test database, then removes both. It does not
 change the normal connection or server authentication settings.
 
-See specs/002-ef-user-service/quickstart.md for comparison evidence and outstanding manual checks.
+See specs/003-ef-stored-procedures/quickstart.md for comparison evidence and outstanding manual checks.
 The inherited scenarios are in specs/001-display-user-list/quickstart.md.
 
 ## SQL Server user service
 
 The solution also contains **UserDatabaseService**, a .NET Framework 4.8 / C# 7.3
-class library referenced by the WPF project. `SqlUserService` uses ADO.NET directly;
-`EfUserService` independently implements the same reads and CRUD using EF6. Both use
-`System.Data.SqlClient`, the same `IUserService` contract and the same `User` model.
+class library referenced by the WPF project. All three services independently implement the
+same seven-operation `IUserService` contract, using `System.Data.SqlClient` and the same `User`:
+
+| Configuration value | Service | User-data execution |
+| --- | --- | --- |
+| Sql | SqlUserService | ADO.NET parameterized SQL |
+| EntityFramework | EfUserService | EF6 LINQ queries and tracked writes |
+| EntityFrameworkStoredProcedures | EfStoredProcedureUserService | Six stored procedures invoked through EF6 |
+
+Neither EF service delegates validation or setup to another implementation. The stored-procedure
+variant also has its own context and does not depend on the earlier EF context/configuration.
 Both projects restore the exact EntityFramework 6.5.2 NuGet package. Keep
 `EntityFramework.dll` and `EntityFramework.SqlServer.dll` beside the deployed application.
 
@@ -102,7 +112,7 @@ Data Source=localhost;Initial Catalog=HelloWorldUsers;Integrated Security=True
 In SSMS, connect to `localhost` using Windows Authentication and refresh Databases.
 The selected Windows identity must be able to connect to SQL Server. Creating a
 new database requires database creation permission; schema setup requires DDL
-permission in the selected database. Normal CRUD operations require SELECT,
+permission in the selected database. The Sql/EntityFramework implementations require SELECT,
 INSERT, UPDATE, and DELETE permission on `dbo.[User]`.
 
 `CreateOrUpdateDatabaseAsync()` creates the named database if missing, then
@@ -124,21 +134,46 @@ In `HelloWorldWpf48/App.config`, select the service used by the main window:
 </appSettings>
 ```
 
-The checked-in selection is `EntityFramework`. Missing or blank values select `Sql`; both
+The checked-in selection is `EntityFramework`. Missing or blank values select `Sql`; all three
 names accept surrounding whitespace and ignore case. Unknown values show the
-configuration error with Retry. Both choices use the same `UserDatabase` connection
+configuration error with Retry. All choices use the same `UserDatabase` connection
 string. Rebuild and restart after changing source configuration.
 
-You can also construct either service directly or use
+You can also construct any service directly or use
 `UserServiceFactory.Create("EntityFramework", connectionString)`. EF uses a fresh
 context per operation and no tracking for reads, so reused service instances see
-changes made through the other implementation. Automatic database initialization
+changes made through another implementation. Automatic database initialization
 and EF migrations are disabled. EF independently validates connections and implements all
 seven operations, including setup through EF contexts, commands and transactions. It never
-constructs or calls `SqlUserService`. Both use the shared schema definition. The original
+constructs or calls `SqlUserService`. All use the shared schema definition. The original
 `SqlUserService` class implementation is preserved; `DuplicateLoginException` is a separate
 shared contract file so deleting the SQL implementation does not break the EF variant.
 The main window only reads data and never invokes setup.
+
+### Stored-procedure variant
+
+Select `EntityFrameworkStoredProcedures` to use `EfStoredProcedureUserService`. Its three reads
+and create/update/delete call only fixed, parameterized procedures through EF6. The multi-login
+lookup sends one Unicode table-valued parameter; case variants remain valid inputs and each
+matched user is returned once. Update/delete consume explicit 0/1 result rows, preserving true
+for unchanged existing updates and false for missing users.
+
+Explicitly call this service's `CreateOrUpdateDatabaseAsync` before first use, including on a
+database already prepared by another service. It installs `dbo.UserLoginList` and
+`dbo.User_GetAll`, `User_GetByLogin`, `User_GetByLogins`, `User_Create`, `User_Update` and
+`User_Delete` while preserving existing rows. Setup alone may issue definition commands.
+It serializes its own catalog creation through a master session lock and applies the shared
+schema plus procedure resources under the existing target transaction/application lock.
+Procedure updates retain grants; an incompatible existing login-list type fails without replacement.
+
+Setup needs database/schema/type/procedure creation and alteration rights. Runtime callers need
+EXECUTE on the procedures and EXECUTE plus REFERENCES on `dbo.UserLoginList`; direct table grants
+are unnecessary for this variant under the same-owner procedure/table setup. No principals or
+grants are created automatically. Missing procedures are reported as unavailable storage and
+require explicit setup; loading/Retry never installs them.
+
+See `specs/003-ef-stored-procedures/contracts/stored-procedures.md` for exact procedure/results
+and setup contracts.
 
 ### Calling the API from C#
 
@@ -149,7 +184,7 @@ using System.Configuration;
 using UserDatabaseService;
 
 // In your async method:
-// Replace EfUserService with SqlUserService to compare the original.
+// Also available: SqlUserService and EfStoredProcedureUserService.
 IUserService users = new EfUserService(
     ConfigurationManager.ConnectionStrings["UserDatabase"].ConnectionString);
 
@@ -188,25 +223,28 @@ Prove EF builds and runs without the SQL implementation (requires the built EF D
 Visual Studio C# compiler):
 
 ```powershell
-.\scripts\Test-EfIndependence.ps1 -Server localhost
+.\scripts\Test-EfIndependence.ps1 -Server localhost -Implementation Both
 ```
 
-This compiles EF and shared contracts into a temporary executable, excluding
-`SqlUserService.cs`, the two-provider factory and the normal service DLL, then exercises
-all seven operations using an owned disposable database.
+This compiles each EF variant into a separate temporary executable and exercises all seven
+operations using an owned disposable database. The third variant excludes both older services,
+their context/configuration, the selection factory and the normal service DLL. The default
+remains the original EntityFramework check; select EntityFrameworkStoredProcedures to run only
+the third variant.
 
 
 Build the solution, then run this in Windows PowerShell:
 
 ```powershell
-.\scripts\Test-UserDatabaseService.ps1 -Implementation Both
+.\scripts\Test-UserDatabaseService.ps1 -Implementation All
 # Or explicitly select another SQL Server instance:
-.\scripts\Test-UserDatabaseService.ps1 -Server 'localhost\SQLEXPRESS' -Implementation Both
+.\scripts\Test-UserDatabaseService.ps1 -Server 'localhost\SQLEXPRESS' -Implementation All
 ```
 
-Use `-Implementation Sql` or `-Implementation EntityFramework` for one provider; the
-default remains `Sql`. `Both` also verifies cross-provider visibility and EF Unicode
-parameter binding for 1 and 2,000 login inputs. This is a correctness comparison;
+Use `-Implementation Sql`, `EntityFramework` or `EntityFrameworkStoredProcedures` for one
+service; the default remains `Sql`. `Both` retains the original two choices. `All` runs all three,
+six directed write/read pairings and mixed setup. The checks retain the original EF scalar
+parameter probes and inspect all six third-service procedure calls and 1/2,000-row TVP transport. This is a correctness comparison;
 no performance ranking is claimed.
 
 The check creates a randomly named `UserServiceTest_...` database and removes

@@ -42,8 +42,11 @@ Explicit CreateOrUpdateDatabaseAsync owns the entire workflow without either ear
 1. Independently validate and normalize the target/master connection settings; preserve the
    existing system-catalog and AttachDBFilename rejection rules without opening a connection.
 2. On its own EF master context, create an absent database using DoNotEnsureTransaction.
-   DB_ID receives a bound Unicode catalog parameter; the validated catalog identifier is
-   bracket-escaped. Only SQL1801 from a creation race is specially tolerated.
+   Serialize its concurrent creators with a session-owned application lock keyed by the
+   uppercased catalog name. Release it in the batch's success/error paths; use an unpooled
+   master connection so cancellation also ends the session and its lock. DB_ID receives a
+   bound Unicode catalog parameter; the validated catalog identifier is bracket-escaped.
+   Only SQL1801 from a race with another implementation is specially tolerated.
 3. On its own target context, open asynchronously and begin an EF transaction. Acquire the
    exclusive, transaction-owned `UserDatabaseService.Schema` application lock with the same
    30-second lock timeout as the old services; use a 60-second setup command timeout.

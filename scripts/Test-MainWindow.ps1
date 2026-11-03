@@ -2,7 +2,7 @@ param(
     [ValidateSet('Debug', 'Release')][string]$Configuration = 'Debug',
     [ValidateSet('All', 'US1', 'US2', 'US3')][string]$Phase = 'All',
     [string]$SqlServer,
-    [ValidateSet('Sql', 'EntityFramework', 'Both')][string]$Implementation = 'Sql',
+    [ValidateSet('Sql', 'EntityFramework', 'EntityFrameworkStoredProcedures', 'Both', 'All')][string]$Implementation = 'Sql',
     [switch]$Interactive
 )
 $ErrorActionPreference = 'Stop'
@@ -69,9 +69,11 @@ public sealed class WindowUserSource : IUserService
 public sealed class EfWindowProbe : DbCommandInterceptor
 {
     public int UserReads;
+    public int ProcedureReads;
     public override void ReaderExecuting(System.Data.Common.DbCommand command,
         DbCommandInterceptionContext<System.Data.Common.DbDataReader> context)
     {
+        if (command.CommandText == "EXEC dbo.User_GetAll;") Interlocked.Increment(ref ProcedureReads);
         if (command.CommandText.Contains("[User]")) Interlocked.Increment(ref UserReads);
     }
 }
@@ -383,14 +385,14 @@ public static class MainWindowChecks
         ConfigurationManager.RefreshSection("appSettings");
     }
 
-    private static void CloseDuringColdModel(string connection)
+    private static void CloseDuringColdModel(string connection, string implementation)
     {
         using (var gate = new ColdModelGate())
         {
             DbInterception.Add(gate);
             try
             {
-                var realSource = new EfUserService(connection);
+                var realSource = UserServiceFactory.Create(implementation, connection);
                 var source = new WindowUserSource();
                 Task<IReadOnlyList<User>> pending = null;
                 source.Outcomes.Enqueue(token => { pending = realSource.GetAllAsync(token); return pending; });
@@ -409,7 +411,7 @@ public static class MainWindowChecks
                 Pump();
                 Assert(pending.IsCanceled && Status(w).Text == text && source.OtherCalls == 0,
                     "Cold EF cancellation is observed without late UI mutation or writes.");
-                Console.WriteLine("PASS: EntityFramework - responsive cold model preparation, immediate close and cancellation");
+                Console.WriteLine("PASS: " + implementation + " - responsive cold model preparation, immediate close and cancellation");
             }
             finally { gate.Release.Set(); DbInterception.Remove(gate); }
         }
@@ -420,10 +422,9 @@ public static class MainWindowChecks
         var w = (Window)Activator.CreateInstance(windowType);
         windows.Add(w); w.Show(); return w;
     }
-    private static void SqlChecks(Assembly assembly, string server, string implementation, string scenario)
+    private static void SqlChecks(Assembly assembly, string server, string implementation, string scenario, string name, bool interactive)
     {
         windowType = assembly.GetType("HelloWorldWpf48.MainWindow", true);
-        var name = "UserListWindowTest_" + Guid.NewGuid().ToString("N");
         var builder = new System.Data.SqlClient.SqlConnectionStringBuilder {
             DataSource = server, InitialCatalog = name, IntegratedSecurity = true, ConnectTimeout = 3
         };
@@ -439,12 +440,11 @@ public static class MainWindowChecks
         app.DispatcherUnhandledException += (s, e) => { unhandled.Add(e.Exception); e.Handled = true; };
         try
         {
-            // Explicit fixture setup happens outside application loading.
-            source.CreateOrUpdateDatabaseAsync().GetAwaiter().GetResult();
+            // Parent-owned fixture was prepared in a different process: this EF request is cold.
             Configure(connection);
             if (scenario == "ColdClose")
             {
-                CloseDuringColdModel(connection);
+                CloseDuringColdModel(connection, implementation);
                 return;
             }
             var watch = Stopwatch.StartNew();
@@ -455,16 +455,21 @@ public static class MainWindowChecks
             Assert(watch.ElapsedMilliseconds < 1000, "Loading UI responds within one second.");
             Console.WriteLine("PASS: {0} - first window UI dispatch {1} ms", implementation, watch.ElapsedMilliseconds);
             Until(() => Status(empty).Text == "No users found", "real SQL empty result");
-            Assert(implementation == "EntityFramework" ? probe.UserReads > 0 : probe.UserReads == 0,
+            Assert(implementation == "EntityFrameworkStoredProcedures" ? probe.ProcedureReads > 0 && probe.UserReads == 0 :
+                implementation == "EntityFramework" ? probe.UserReads > 0 && probe.ProcedureReads == 0 :
+                probe.UserReads == 0 && probe.ProcedureReads == 0,
                 "Configured window actually uses the selected query implementation.");
             empty.Close();
-            foreach (string value in new[] { null, "", " ", " sQL ", " eNTITYfRAMEWORK " })
+            foreach (string value in new[] { null, "", " ", " sQL ", " eNTITYfRAMEWORK ", " eNTITYfRAMEWORKsTOREDpROCEDURES " })
             {
                 var selected = UserServiceFactory.Create(value, connection);
-                Assert(selected.GetType().Name == (value != null && value.Trim().Equals("EntityFramework", StringComparison.OrdinalIgnoreCase)
-                    ? "EfUserService" : "SqlUserService"), "Factory selection/default/case/trim.");
+                var expected = value != null && value.Trim().Equals("EntityFrameworkStoredProcedures", StringComparison.OrdinalIgnoreCase)
+                    ? "EfStoredProcedureUserService" : value != null && value.Trim().Equals("EntityFramework", StringComparison.OrdinalIgnoreCase)
+                    ? "EfUserService" : "SqlUserService";
+                Assert(selected.GetType().Name == expected, "Factory selection/default/case/trim.");
             }
-            foreach (string value in new[] { null, " ", " sQL " })
+            foreach (string value in implementation == "EntityFrameworkStoredProcedures"
+                ? new[] { null, " ", " sQL ", " eNTITYfRAMEWORKsTOREDpROCEDURES " } : new[] { null, " ", " sQL " })
             {
                 ConfigureImplementation(value);
                 var defaultView = ProductionWindow();
@@ -490,6 +495,23 @@ public static class MainWindowChecks
             var after = string.Join("|", source.GetAllAsync().GetAwaiter().GetResult().Select(u => u.Login + ":" + u.Name + ":" + u.Age));
             Assert(before == after, "Real application viewing preserves rows.");
             Console.WriteLine("PASS: " + implementation + " - default constructor/config path; empty/populated/duplicate names/Unicode/zero; data unchanged");
+
+            if (implementation == "EntityFrameworkStoredProcedures")
+            {
+                SqlCommand(connection, "DROP PROCEDURE dbo.User_GetAll;");
+                var missing = ProductionWindow();
+                Until(() => Failed(missing), "missing read procedure");
+                Assert(Status(missing).Text.Contains("storage") && Retry(missing).IsEnabled && !Grid(missing).IsVisible,
+                    "Missing procedure gives safe setup feedback");
+                Assert(Scalar(connection, "SELECT OBJECT_ID(N'dbo.User_GetAll',N'P');") == DBNull.Value,
+                    "Window did not install missing procedure");
+                new EfStoredProcedureUserService(connection).CreateOrUpdateDatabaseAsync().GetAwaiter().GetResult();
+                ClickRetry(missing);
+                Until(() => Grid(missing).IsVisible, "explicit procedure repair followed by Retry");
+                Assert(Grid(missing).Items.Count == 3, "Explicit repair and Retry preserves fixture users");
+                missing.Close();
+                Console.WriteLine("PASS: EntityFrameworkStoredProcedures - SQL2812, no implicit repair, explicit setup and Retry");
+            }
 
             foreach (string invalid in new[] { null, "invalid connection value" })
             {
@@ -539,6 +561,11 @@ public static class MainWindowChecks
             Assert(unhandled.Count == 0, "No unhandled SQL-window errors.");
             Console.WriteLine("PASS: " + implementation + " - provider access denial followed by one Retry; data preserved");
             Console.WriteLine("PASS: " + implementation + " - " + assertions + " real-source assertions");
+            if (interactive)
+            {
+                var view = (Window)Activator.CreateInstance(windowType);
+                windows.Add(view); view.Title = implementation + " - real source inspection"; view.ShowDialog();
+            }
         }
         finally
         {
@@ -546,16 +573,52 @@ public static class MainWindowChecks
             app.Shutdown();
             DbInterception.Remove(probe);
             System.Data.SqlClient.SqlConnection.ClearAllPools();
-            // Name is generated by this test; no normal database or principal is touched.
-            SqlCommand(master, "IF DB_ID(N'" + name + "') IS NOT NULL BEGIN ALTER DATABASE [" + name +
-                "] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [" + name + "]; END;");
-            Console.WriteLine("Removed owned SQL fixture: " + name);
+            // The parent owns cleanup, including failed child processes.
         }
     }
     [STAThread]
     public static int Main(string[] args)
     {
-        try { SqlChecks(Assembly.LoadFrom(args[0]), args[1], args[2], args[3]); return 0; }
+        try
+        {
+            string name = args[4];
+            Guid identity;
+            const string prefix = "UserListWindowTest_";
+            if (!name.StartsWith(prefix, StringComparison.Ordinal) || !Guid.TryParseExact(name.Substring(prefix.Length), "N", out identity))
+                throw new Exception("Invalid owned fixture name.");
+            var builder = new System.Data.SqlClient.SqlConnectionStringBuilder {
+                DataSource = args[1], InitialCatalog = name, IntegratedSecurity = true, ConnectTimeout = 30
+            };
+            var connection = builder.ConnectionString;
+            if (args[3] == "Prepare")
+            {
+                IUserService setup = args[2] == "EntityFrameworkStoredProcedures"
+                    ? (IUserService)new EfStoredProcedureUserService(connection) : new SqlUserService(connection);
+                setup.CreateOrUpdateDatabaseAsync().GetAwaiter().GetResult();
+                return 0;
+            }
+            if (args[3] == "Cleanup")
+            {
+                builder.InitialCatalog = "master";
+                System.Data.SqlClient.SqlConnection.ClearAllPools();
+                SqlCommand(builder.ConnectionString, "IF DB_ID(N'" + name + "') IS NOT NULL BEGIN ALTER DATABASE [" + name +
+                    "] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [" + name + "]; END;");
+                Console.WriteLine("Removed owned SQL fixture: " + name);
+                return 0;
+            }
+            if (args[3] == "Order")
+            {
+                // No configuration pre-registration or interceptor can mask discovery order here.
+                string second = args[2] == "EntityFramework" ? "EntityFrameworkStoredProcedures" : "EntityFramework";
+                var firstRows = UserServiceFactory.Create(args[2], connection).GetAllAsync().GetAwaiter().GetResult();
+                var nextRows = UserServiceFactory.Create(second, connection).GetAllAsync().GetAwaiter().GetResult();
+                Assert(firstRows.Count == nextRows.Count, "Both EF discovery orders work");
+                Console.WriteLine("PASS: normal configuration discovery " + args[2] + " -> " + second);
+                return 0;
+            }
+            SqlChecks(Assembly.LoadFrom(args[0]), args[1], args[2], args[3], name, args[5] == "True");
+            return 0;
+        }
         catch (Exception error)
         {
             var sql = error as System.Data.SqlClient.SqlException;
@@ -635,17 +698,30 @@ if ($SqlServer) {
         Copy-Item ($exe + '.config') ($hostExe + '.config')
         $stdout = Join-Path $validationDirectory 'stdout.txt'
         $stderr = Join-Path $validationDirectory 'stderr.txt'
-        $implementations = if ($Implementation -eq 'Both') { @('Sql', 'EntityFramework') } else { @($Implementation) }
+        function Invoke-OwnedHost([string]$Mode, [string]$Scenario, [string]$Fixture) {
+            $arguments = @(('"{0}"' -f (Join-Path $validationDirectory 'HelloWorldWpf48.exe')),
+                ('"{0}"' -f $SqlServer), $Mode, $Scenario, $Fixture, $Interactive.IsPresent.ToString())
+            $process = Start-Process -FilePath $hostExe -ArgumentList $arguments -Wait -PassThru -NoNewWindow -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+            Get-Content -LiteralPath $stdout
+            if ($process.ExitCode -ne 0) {
+                Get-Content -LiteralPath $stderr | Write-Host
+                throw "SQL window validation failed: $Mode / $Scenario."
+            }
+        }
+        $implementations = if ($Implementation -eq 'All') { @('Sql', 'EntityFramework', 'EntityFrameworkStoredProcedures') }
+            elseif ($Implementation -eq 'Both') { @('Sql', 'EntityFramework') } else { @($Implementation) }
         foreach ($mode in $implementations) {
-            $scenarios = if ($mode -eq 'EntityFramework') { @('Full', 'ColdClose') } else { @('Full') }
-            foreach ($scenario in $scenarios) {
-                $arguments = @(('"{0}"' -f (Join-Path $validationDirectory 'HelloWorldWpf48.exe')), ('"{0}"' -f $SqlServer), $mode, $scenario)
-                $process = Start-Process -FilePath $hostExe -ArgumentList $arguments -Wait -PassThru -NoNewWindow -RedirectStandardOutput $stdout -RedirectStandardError $stderr
-                Get-Content -LiteralPath $stdout
-                if ($process.ExitCode -ne 0) {
-                    Get-Content -LiteralPath $stderr | Write-Host
-                    throw "SQL window validation failed: $mode / $scenario."
+            $fixture = 'UserListWindowTest_' + [Guid]::NewGuid().ToString('N')
+            try {
+                Invoke-OwnedHost $mode 'Prepare' $fixture
+                $scenarios = if ($mode -eq 'Sql') { @('Full') } else { @('Full', 'ColdClose') }
+                foreach ($scenario in $scenarios) { Invoke-OwnedHost $mode $scenario $fixture }
+                if ($mode -eq 'EntityFrameworkStoredProcedures') {
+                    Invoke-OwnedHost $mode 'Order' $fixture
+                    Invoke-OwnedHost 'EntityFramework' 'Order' $fixture
                 }
+            } finally {
+                Invoke-OwnedHost $mode 'Cleanup' $fixture
             }
         }
     } finally {

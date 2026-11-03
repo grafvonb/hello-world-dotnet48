@@ -35,7 +35,7 @@ All three choices retain responsive first-load/pending-close behavior.
 
 ## Validation Commands to Extend
 
-| Entry point | Planned selection values | Compatibility |
+| Entry point | Selection values | Compatibility |
 |---|---|---|
 | Test-UserDatabaseService.ps1 -Implementation | Sql, EntityFramework, EntityFrameworkStoredProcedures, Both, All | Default Sql; Both retains original two; All runs all three and shared comparisons once. |
 | Test-MainWindow.ps1 -SqlServer ... -Implementation | Same five values | Default Sql; Both retains original pair; All runs real copied hosts for all three. |
@@ -56,5 +56,5 @@ For interceptor registration, tooling may discover configuration with the select
 type/assembly before adding interceptors; it must not construct or substitute old configuration
 to make third-only/provider-order checks pass. Fresh order tests use normal discovery.
 
-Commands, selectors and outcomes in this document are planned interfaces; they are not yet
-implemented or executed by the planning workflow.
+Commands and selectors are implemented. Executed outcomes and unexecuted manual acceptance
+are recorded in ../quickstart.md.

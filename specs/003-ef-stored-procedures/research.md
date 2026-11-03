@@ -126,6 +126,12 @@ without dropping objects or procedure grants. Verify an existing type matches th
 column contract; incompatible types fail explicitly rather than being dropped/recreated.
 Normal reads/writes never invoke setup.
 
+Implementation refinement (2026-11-03): an early cold concurrent-creation test reported SQL0.
+The third service now serializes its own catalog creators with a session-owned master lock,
+released on success/error; the master connection is unpooled so cancellation cannot retain a
+session lock in the pool. The target transaction/lock is unchanged. This is serialization,
+not a retry or error-suppression policy. Final rerun evidence is in quickstart.md.
+
 Repository inspection confirms shared Schema.sql repairs missing named check constraints, not
 a removed primary key or disabled constraints. The spec assumptions now make that existing
 compatibility boundary explicit; this feature does not broaden schema-repair behavior.
@@ -166,3 +172,14 @@ manual acceptance as unexecuted unless actually performed.
 Repository evidence: scripts/Test-UserDatabaseService.ps1, scripts/Test-MainWindow.ps1,
 scripts/Test-EfIndependence.ps1 and HelloWorldWpf48/MainWindow.xaml.cs. No additional test framework,
 public phase flag, provider retry policy, benchmark or user-facing implementation picker is needed.
+
+## Executing cancellation refinement — 2026-11-03
+
+The real creation-lock-wait test exposed Framework SqlClient returning SQL0 for a canceled
+executing command. The third service normalizes only an attention-shaped all-zero error
+collection (state 0, class 11) while its own token is canceled into OperationCanceledException,
+retaining the provider error as InnerException. Other SQL numbers, fatal errors and SQL0
+without that canceled token remain provider failures; no localized message matching is used.
+The cancellation test also verifies explicit setup recovery after session disposal.
+
+Source: [Framework SqlClient attention handling](https://raw.githubusercontent.com/microsoft/referencesource/main/System.Data/System/Data/SqlClient/TdsParser.cs).

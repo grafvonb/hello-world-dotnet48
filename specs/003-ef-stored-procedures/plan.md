@@ -144,7 +144,8 @@ to choose the design. No unresolved clarification remains.
   Translate duplicate creates to the shared DuplicateLoginException. Missing/invalid procedure
   result shapes fail; only the defined 0 outcome means not found.
 - Independently implement explicit setup through own EF master/target contexts. Use autocommit
-  for catalog creation, then the exact shared transaction-owned schema lock for Schema.sql,
+  for catalog creation, serializing its own creators through a session-owned master application
+  lock on an unpooled connection; then use the exact shared transaction-owned schema lock for Schema.sql,
   Bootstrap.sql and six ALTER resources. Preserve cancellation-before-commit, creation races,
   data, definitions and grants. No normal path repairs missing procedures.
 - UserServiceFactory adds EntityFrameworkStoredProcedures with the same trim/case rules.

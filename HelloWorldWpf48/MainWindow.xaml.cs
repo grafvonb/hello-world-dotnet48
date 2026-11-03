@@ -116,6 +116,7 @@ namespace HelloWorldWpf48
                     case 230:
                         return "Access to user data was denied. Check your database permissions.";
                     case 208:
+                    case 2812:
                         return "User storage is unavailable or has not been prepared. Check database setup and access.";
                     case 4060:
                         return "The user database cannot be opened. Check availability and access.";
