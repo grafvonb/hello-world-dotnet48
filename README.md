@@ -203,6 +203,10 @@ It serializes its own catalog creation through a master session lock and applies
 schema plus procedure resources under the existing target transaction/application lock.
 Procedure updates retain grants; an incompatible existing login-list type fails without replacement.
 
+SQL source files use Windows CRLF line endings to match SSMS-generated scripts. Git and
+EditorConfig preserve this convention. After changing SQL resources, rebuild and run
+`.\db.cmd sp` to update existing procedure definitions before reopening them in SSMS.
+
 Setup needs database/schema/type/procedure creation and alteration rights. Runtime callers need
 EXECUTE on the procedures and EXECUTE plus REFERENCES on `dbo.UserLoginList`; direct table grants
 are unnecessary for this variant under the same-owner procedure/table setup. No principals or
