@@ -34,6 +34,18 @@ msbuild .\HelloWorldWpf48.sln -restore /t:Build /p:Configuration=Debug /p:Platfo
 
 Use Visual Studio's MSBuild for this classic .NET Framework WPF project.
 
+## Continuous integration
+
+The GitHub Actions workflow in `.github/workflows/build-and-test.yml` runs on pushes
+to every branch and pull requests targeting any branch, and supports manual runs. Each Windows
+job restores and builds the whole solution in Debug or Release, then runs the
+database service checks for all three implementations, both EF independence checks,
+and the WPF window checks with controlled data and each real database provider.
+
+Database checks use a disposable SQL Server LocalDB instance on the runner. Each
+suite owns and removes its test databases, and the workflow stops and deletes the
+instance afterward. No database credentials or repository secrets are required.
+
 ## Files to explore
 
 - `HelloWorldWpf48/MainWindow.xaml`: read-only user grid, loading status, and Retry.

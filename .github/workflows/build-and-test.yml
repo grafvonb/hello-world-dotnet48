@@ -1,0 +1,81 @@
+name: Build and test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build and test (${{ matrix.configuration }})
+    runs-on: windows-2022
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
+    defaults:
+      run:
+        # The test scripts load .NET Framework assemblies and require Windows PowerShell.
+        shell: powershell
+    env:
+      BUILD_CONFIGURATION: ${{ matrix.configuration }}
+      SQL_SERVER: (localdb)\HelloWorldWpf48Ci
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v3
+
+      - name: Restore and build the whole solution
+        run: >-
+          msbuild .\HelloWorldWpf48.sln -restore -m /t:Build
+          /p:Configuration=$env:BUILD_CONFIGURATION /p:Platform="Any CPU"
+
+      - name: Start disposable SQL Server LocalDB
+        run: |
+          $localDb = Get-ChildItem "${env:ProgramFiles}\Microsoft SQL Server\*\Tools\Binn\SqlLocalDB.exe" |
+            Sort-Object { $_.VersionInfo.FileMajorPart } -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (!$localDb) { throw 'SQL Server LocalDB is required.' }
+          & $localDb create HelloWorldWpf48Ci -s
+          if ($LASTEXITCODE -ne 0) { throw 'Could not start the CI LocalDB instance.' }
+          "SQLLOCALDB_EXE=$localDb" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Test all database service implementations
+        run: >-
+          .\scripts\Test-UserDatabaseService.ps1
+          -Configuration $env:BUILD_CONFIGURATION -Server $env:SQL_SERVER -Implementation All
+
+      - name: Test both independent Entity Framework implementations
+        run: >-
+          .\scripts\Test-EfIndependence.ps1
+          -Configuration $env:BUILD_CONFIGURATION -Server $env:SQL_SERVER -Implementation Both
+
+      - name: Test WPF window behavior
+        run: >-
+          powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -STA
+          -File .\scripts\Test-MainWindow.ps1 -Configuration $env:BUILD_CONFIGURATION
+
+      - name: Test WPF window with all database service implementations
+        run: >-
+          powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -STA
+          -File .\scripts\Test-MainWindow.ps1 -Configuration $env:BUILD_CONFIGURATION
+          -SqlServer $env:SQL_SERVER -Implementation All
+
+      - name: Remove CI LocalDB instance
+        if: ${{ always() && env.SQLLOCALDB_EXE != '' }}
+        run: |
+          & $env:SQLLOCALDB_EXE stop HelloWorldWpf48Ci -k
+          if ($LASTEXITCODE -ne 0) { throw 'Could not stop the CI LocalDB instance.' }
+          & $env:SQLLOCALDB_EXE delete HelloWorldWpf48Ci
+          if ($LASTEXITCODE -ne 0) { throw 'Could not delete the CI LocalDB instance.' }
